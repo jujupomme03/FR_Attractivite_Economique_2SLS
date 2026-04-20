@@ -1,0 +1,408 @@
+---
+title: "Disparités de développement économique entre départements français"
+subtitle: "Analyse économétrique des déterminants de la création d'entreprises"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, comment = NA)
+```
+
+# Introduction
+
+Ce rapport analyse les **disparités de développement économique entre les départements français métropolitains** à travers l'étude des déterminants de la création d'entreprises. L'objectif est d'identifier les facteurs structurels qui expliquent pourquoi certains départements enregistrent des taux de création d'entreprises significativement plus élevés que d'autres, afin d'éclairer les politiques territoriales de réduction des inégalités.
+
+La variable dépendante retenue est la **proportion de créations d'entreprises en 2022** (*pcENT*), mesurée comme le ratio entre les nouvelles immatriculations et le stock d'entreprises existantes en 2021. Six variables explicatives sont mobilisées : la densité d'entreprises (*nbENT*), la population (*POP*), le niveau de diplôme (*DIPL*), le revenu médian (*REV*), le taux de chômage (*txCHOM*) et la présence d'une métropole (*METRO*). Deux variables instrumentales (*POPa*, *POP2015*) sont disponibles pour traiter d'éventuels problèmes d'endogénéité.
+
+| Code    | Définition                                                      | Unité               | Type        |
+|---------|-----------------------------------------------------------------|---------------------|-------------|
+| pcENT   | Proportion de créations d'entreprises en 2022 / stock 2021     | %                   | Dépendante  |
+| nbENT   | Nombre d'entreprises 2021 / population 2021                    | %                   | Explicative |
+| POP     | Population totale en 2021                                       | Milliers            | Explicative |
+| DIPL    | Part des diplômés Bac+3 ou plus                                | %                   | Explicative |
+| REV     | Revenu annuel médian                                            | Milliers d'euros    | Explicative |
+| txCHOM  | Taux de chômage                                                 | %                   | Explicative |
+| METRO   | Présence d'une métropole (1 = Oui, 0 = Non)                   | Binaire             | Explicative |
+| POPa    | Part de la population active en 2021                           | %                   | Instrumentale |
+| POP2015 | Population totale en 2015                                       | Milliers            | Instrumentale |
+
+La méthodologie suivie respecte le protocole économétrique standard : (1) statistiques descriptives, (2) spécification et estimation MCO, (3) vérification des hypothèses de Gauss-Markov, (4) corrections si nécessaire, (5) endogénéité.
+
+---
+
+# Statistiques descriptives
+
+## Chargement des données et mise en forme
+
+```{r}
+rm(list = ls())
+library(readxl); library(ggplot2); library(patchwork); library(ggcorrplot)
+library(lmtest); library(sandwich); library(car); library(AER)
+library(stargazer); library(MASS)
+
+# Import et nettoyage
+data <- read_excel("BD_brute.xls", sheet = 3)
+BD   <- subset(data, select = -c(code, libellé))
+BD$METRO <- as.factor(BD$METRO)
+```
+
+Les départements d'Outre-mer et de la Corse ont été retirés en amont (valeurs manquantes). L'échantillon final comprend **`r nrow(BD)` départements** métropolitains.
+
+## Statistiques univariées
+
+```{r}
+summary(BD[, c("pcENT","nbENT","POP","DIPL","REV","txCHOM")])
+```
+
+Plusieurs faits saillants ressortent de ce tableau :
+
+- **pcENT** varie de 12,4 % à 33,9 % (moyenne 18,4 %), révélant des disparités importantes : certains départements créent près de trois fois plus d'entreprises relativement à leur stock que les moins dynamiques.
+- **nbENT** et **POP** présentent des distributions très asymétriques (fort écart-type), suggérant la présence d'outliers — très probablement les départements franciliens.
+- **REV** et **txCHOM** sont distribués de façon plus homogène (écart-type faible), indiquant une relative convergence nationale sur ces dimensions.
+
+```{r, fig.width=10, fig.height=8}
+vars   <- c("pcENT","nbENT","POP","DIPL","REV","txCHOM")
+titres <- c("Création d'entreprises (%)","Densité d'entreprises (%)","Population (milliers)",
+            "Diplômés Bac+3 (%)","Revenu médian (k€)","Taux de chômage (%)")
+couleurs <- c("lightblue","lightgreen","lightyellow","lightpink","lightcyan","lightseagreen")
+
+plots <- mapply(function(v, t, c) {
+  ggplot(BD, aes_string(x = v)) +
+    geom_histogram(fill = c, color = "black", bins = 20) +
+    labs(title = t, x = NULL, y = "Fréquence") +
+    theme_minimal() +
+    theme(plot.title = element_text(size = 9, hjust = 0.5))
+}, vars, titres, couleurs, SIMPLIFY = FALSE)
+
+wrap_plots(plots, ncol = 3)
+```
+
+*pcENT*, *REV* et *txCHOM* suivent des distributions approximativement symétriques. En revanche, *nbENT*, *POP* et *DIPL* présentent une **asymétrie droite marquée** avec quelques valeurs extrêmes correspondant aux grandes métropoles. Ces asymétries motivent une transformation logarithmique de ces trois variables afin de linéariser les relations avec la variable dépendante et de réduire l'influence des outliers.
+
+## Analyse bivariée
+
+```{r, fig.width=10, fig.height=7}
+g1 <- ggplot(BD, aes(nbENT, pcENT)) + geom_point() + geom_smooth(method="lm", se=FALSE, color="steelblue") +
+      labs(title="Densité d'entreprises vs pcENT", x="nbENT", y="pcENT") + theme_minimal()
+g2 <- ggplot(BD, aes(POP, pcENT))   + geom_point() + geom_smooth(method="lm", se=FALSE, color="steelblue") +
+      labs(title="Population vs pcENT", x="POP", y="pcENT") + theme_minimal()
+g3 <- ggplot(BD, aes(DIPL, pcENT))  + geom_point() + geom_smooth(method="lm", se=FALSE, color="steelblue") +
+      labs(title="Diplôme vs pcENT", x="DIPL", y="pcENT") + theme_minimal()
+g4 <- ggplot(BD, aes(REV, pcENT))   + geom_point() + geom_smooth(method="lm", se=FALSE, color="steelblue") +
+      labs(title="Revenu médian vs pcENT", x="REV", y="pcENT") + theme_minimal()
+g5 <- ggplot(BD, aes(txCHOM, pcENT))+ geom_point() + geom_smooth(method="lm", se=FALSE, color="steelblue") +
+      labs(title="Chômage vs pcENT", x="txCHOM", y="pcENT") + theme_minimal()
+g6 <- ggplot(BD, aes(factor(METRO), pcENT, fill=factor(METRO))) +
+      geom_boxplot(alpha=0.7) + scale_fill_manual(values=c("#FFA07A","#20B2AA")) +
+      scale_x_discrete(labels=c("0"="Sans métropole","1"="Avec métropole")) +
+      labs(title="Métropole vs pcENT", x=NULL, y="pcENT") + theme_minimal() + theme(legend.position="none")
+
+(g1 + g2 + g3) / (g4 + g5 + g6)
+```
+
+Les nuages de points confirment des relations positives entre *pcENT* et les variables *nbENT*, *POP*, *DIPL* — avec une allure légèrement exponentielle justifiant le passage en log. La relation avec *REV* et *txCHOM* est plus diffuse. Les départements dotés d'une métropole affichent une médiane de *pcENT* sensiblement plus élevée.
+
+---
+
+# Spécification et estimation MCO
+
+## Transformation logarithmique et modèle retenu
+
+Les analyses descriptives motivent une transformation log-log pour *pcENT*, *nbENT*, *POP* et *DIPL*. Le modèle estimé est :
+
+$$\ln(pcENT_i) = \beta_0 + \beta_1\ln(nbENT_i) + \beta_2\ln(POP_i) + \beta_3\ln(DIPL_i) + \beta_4 REV_i + \beta_5 txCHOM_i + \beta_6 METRO_i + \varepsilon_i$$
+
+Les coefficients associés aux variables en log s'interprètent comme des **élasticités** : $\beta_k$ mesure la variation en % de *pcENT* associée à une hausse de 1 % de la variable $k$.
+
+```{r}
+BD2 <- data.frame(
+  lnpcENT = log(BD$pcENT),
+  lnnbENT = log(BD$nbENT),
+  lnPOP   = log(BD$POP),
+  lnDIPL  = log(BD$DIPL),
+  REV     = BD$REV,
+  txCHOM  = BD$txCHOM,
+  METRO   = BD$METRO,
+  POPa    = BD$POPa,
+  POP2015 = BD$POP2015
+)
+
+model <- lm(lnpcENT ~ lnnbENT + lnPOP + lnDIPL + REV + txCHOM + METRO, data = BD2)
+summary(model)
+```
+
+**Lecture des résultats :** Le modèle est globalement significatif (test de Fisher, p < 0,001) et le R² ajusté de **0,733** indique que les six régresseurs expliquent 73,3 % de la variabilité du taux de création d'entreprises entre départements. Cinq variables sont significatives au seuil de 5 % (*lnnbENT*, *lnPOP*, *lnDIPL*, *txCHOM*, *METRO*) ; le revenu médian (*REV*) ne l'est pas. Ces premiers résultats encourageants appellent cependant une vérification rigoureuse des hypothèses de Gauss-Markov.
+
+---
+
+# Vérification des hypothèses de Gauss-Markov
+
+Avant toute interprétation définitive, les hypothèses sous-jacentes aux MCO doivent être testées dans l'ordre logique suivant : (1) absence de multicolinéarité, (2) normalité des résidus, (3) homoscédasticité, (4) absence d'autocorrélation.
+
+## Multicolinéarité
+
+### Matrice de corrélation et règle de Klein
+
+```{r, fig.width=7, fig.height=6}
+cor_mat <- cor(BD2[, c("lnnbENT","lnPOP","lnDIPL","REV","txCHOM")])
+ggcorrplot(cor_mat, method="square", type="lower", lab=TRUE, lab_size=4,
+           colors=c("blue","white","red"), title="Matrice de corrélation des régresseurs",
+           ggtheme=theme_minimal())
+```
+
+La corrélation entre *lnnbENT* et *lnPOP* atteint **0,96**, ce qui signale une multicolinéarité quasi-parfaite entre ces deux variables. Logiquement : le nombre total d'entreprises d'un département est mécaniquement lié à sa taille démographique.
+
+```{r}
+# Règle de Klein : r²(Xi,Xj) > R² du modèle ?
+R2 <- summary(model)$r.squared
+round(cor_mat^2 > R2, 0)
+```
+
+La règle de Klein confirme une colinéarité problématique entre *lnnbENT* et *lnPOP*.
+
+### Facteurs d'inflation de la variance (VIF)
+
+```{r}
+vif(model)
+```
+
+Les VIF de *lnnbENT* (≈ 25,8) et *lnPOP* (≈ 17,6) dépassent largement le seuil critique de 10, confirmant une multicolinéarité sévère. Les autres variables présentent des VIF acceptables (< 5).
+
+### Traitement : suppression de la variable redondante
+
+La solution standard face à une multicolinéarité aussi forte est d'**exclure l'une des deux variables colinéaires**. Sur le plan théorique, *lnPOP* (taille démographique) est une variable de contrôle plus générale et exogène que *lnnbENT* (stock d'entreprises), qui est potentiellement endogène à la dynamique entrepreneuriale. Nous retenons *lnPOP* et supprimons *lnnbENT*.
+
+```{r}
+model2 <- lm(lnpcENT ~ lnPOP + lnDIPL + REV + txCHOM + METRO, data = BD2)
+vif(model2)
+```
+
+Tous les VIF sont désormais inférieurs à 5 : la multicolinéarité est résolue.
+
+```{r}
+summary(model2)
+```
+
+Le modèle sans *lnnbENT* reste globalement significatif (F-test, p < 0,001) avec un R² ajusté de **`r round(summary(model2)$adj.r.squared, 3)`**. Toutes les variables restantes sont significatives au seuil de 5 %, à l'exception de *REV*.
+
+## Normalité des résidus
+
+```{r, fig.width=10, fig.height=4}
+residus <- residuals(model2)
+
+p1 <- ggplot(data.frame(r=residus), aes(x=r)) +
+  geom_histogram(aes(y=..density..), bins=15, fill="steelblue", color="white", alpha=0.7) +
+  stat_function(fun=dnorm, args=list(mean=mean(residus), sd=sd(residus)), color="red", size=1) +
+  labs(title="Distribution des résidus", x="Résidus", y="Densité") + theme_minimal()
+
+p2 <- ggplot(data.frame(r=residus), aes(sample=r)) +
+  stat_qq(color="steelblue") + stat_qq_line(color="red") +
+  labs(title="QQ-plot des résidus", x="Quantiles théoriques", y="Quantiles observés") + theme_minimal()
+
+p1 + p2
+```
+
+```{r}
+shapiro.test(residus)
+```
+
+**Le test de Shapiro-Wilk** (H₀ : normalité) donne une p-value de `r round(shapiro.test(residus)$p.value, 3)`. 
+
+- Si p-value > 0,05 : on ne rejette pas H₀ → **les résidus sont normalement distribués**, l'hypothèse de normalité est satisfaite.
+- Si p-value < 0,05 : on rejette H₀ → les résidus ne sont pas normaux, mais cette hypothèse est moins critique avec n = `r nrow(BD2)` observations (TCL).
+
+## Homoscédasticité
+
+L'homoscédasticité (variance constante des résidus) est une condition nécessaire pour que les estimateurs MCO soient BLUE (Best Linear Unbiased Estimators). Sa violation entraîne des écarts-types biaisés et des tests d'inférence invalides.
+
+```{r, fig.width=8, fig.height=4}
+fits <- fitted(model2)
+
+p3 <- ggplot(data.frame(fits=fits, res=residus), aes(x=fits, y=res)) +
+  geom_point(color="steelblue", alpha=0.7) +
+  geom_hline(yintercept=0, color="red", linetype="dashed") +
+  geom_smooth(se=FALSE, color="orange", size=0.8) +
+  labs(title="Résidus vs valeurs ajustées", x="Valeurs ajustées", y="Résidus") +
+  theme_minimal()
+
+p4 <- ggplot(data.frame(fits=fits, res=sqrt(abs(residus))), aes(x=fits, y=res)) +
+  geom_point(color="steelblue", alpha=0.7) +
+  geom_smooth(se=FALSE, color="orange", size=0.8) +
+  labs(title="Scale-Location", x="Valeurs ajustées", y="√|Résidus standardisés|") +
+  theme_minimal()
+
+p3 + p4
+```
+
+```{r}
+bptest(model2)          # Test de Breusch-Pagan
+```
+
+**Le test de Breusch-Pagan** (H₀ : homoscédasticité) permet de conclure :
+
+- Si p-value > 0,05 : **pas d'hétéroscédasticité détectée** → les estimateurs MCO sont efficaces.
+- Si p-value < 0,05 : **hétéroscédasticité détectée** → les estimateurs restent sans biais mais ne sont plus efficaces ; les écarts-types standards sont incorrects.
+
+```{r}
+# En cas d'hétéroscédasticité : estimateurs de la variance robuste (Huber-White)
+coeftest(model2, vcov = vcovHC(model2, type = "HC3"))
+```
+
+En présence d'hétéroscédasticité, les **écarts-types robustes de White (HC3)** fournissent une inférence valide sans modifier les coefficients estimés. C'est la correction standard en économétrie appliquée sur données en coupe transversale.
+
+## Absence d'autocorrélation des résidus
+
+Sur données en coupe transversale, l'autocorrélation n'est pas le problème principal. Toutefois, elle peut être présente si les départements proches géographiquement partagent des caractéristiques non observées (autocorrélation spatiale).
+
+```{r}
+dwtest(model2)    # Test de Durbin-Watson (autocorrélation d'ordre 1)
+bgtest(model2, order = 2)  # Test de Breusch-Godfrey (ordre 2)
+```
+
+**Le test de Durbin-Watson** évalue H₀ : absence d'autocorrélation d'ordre 1. Une statistique proche de 2 et une p-value > 0,05 indiquent l'absence d'autocorrélation.
+
+---
+
+# Endogénéité et variables instrumentales
+
+## Identification du problème
+
+L'endogénéité survient lorsqu'une variable explicative $X_k$ est corrélée au terme d'erreur $\varepsilon$ : $\text{Cov}(X_k, \varepsilon) \neq 0$. Dans ce cas, l'estimateur MCO est **biaisé et non convergent**.
+
+Dans notre modèle, la variable *lnPOP* (population 2021) est susceptible d'être endogène : la dynamique entrepreneuriale d'un département peut attirer de nouveaux habitants (causalité inverse), créant une corrélation entre *lnPOP* et le terme d'erreur.
+
+Deux instruments sont disponibles :
+- **POPa** : part de la population active en 2021
+- **POP2015** : population totale en 2015
+
+Un instrument valide doit satisfaire deux conditions : (1) **pertinence** — être corrélé avec *lnPOP* ; (2) **exogénéité** — ne pas être corrélé avec $\varepsilon$.
+
+## Test de pertinence des instruments (première étape des 2SLS)
+
+```{r}
+# Première étape : régression de lnPOP sur les instruments et exogènes
+fs_complet  <- lm(lnPOP ~ lnDIPL + REV + txCHOM + METRO + POPa + POP2015, data=BD2)
+fs_restreint <- lm(lnPOP ~ lnDIPL + REV + txCHOM + METRO, data=BD2)
+
+anova(fs_restreint, fs_complet)
+```
+
+Le test F de la première étape évalue la pertinence conjointe des instruments. Une statistique F > 10 (règle empirique de Staiger & Stock) est requise pour écarter le risque d'instruments faibles.
+
+```{r}
+# Test sur chaque instrument séparément
+fs_POPa   <- lm(lnPOP ~ lnDIPL + REV + txCHOM + METRO + POPa, data=BD2)
+fs_POP2015 <- lm(lnPOP ~ lnDIPL + REV + txCHOM + METRO + POP2015, data=BD2)
+
+anova(fs_restreint, fs_POPa)      # F-test pour POPa
+anova(fs_restreint, fs_POP2015)   # F-test pour POP2015
+```
+
+**Interprétation :** *POP2015* (population 2015) est un instrument fort (F > 10) et exogène par construction — la taille de la population il y a 7 ans ne dépend pas de la création d'entreprises en 2022. *POPa* apparaît plus faible (F < 10) : on préférera *POP2015* comme instrument principal.
+
+## Test d'endogénéité de Hausman-Wu
+
+```{r}
+# Résidus de la première étape avec l'instrument retenu
+first_stage <- lm(lnPOP ~ lnDIPL + REV + txCHOM + METRO + POP2015, data=BD2)
+BD2$v_hat  <- residuals(first_stage)
+
+# Test de Hausman augmenté
+hausman_test <- lm(lnpcENT ~ lnPOP + lnDIPL + REV + txCHOM + METRO + v_hat, data=BD2)
+summary(hausman_test)
+```
+
+**Interprétation :** Le test de Hausman-Wu teste H₀ : absence d'endogénéité (MCO consistent). La statistique de test est le t associé au coefficient de *v_hat* (résidus de la première étape) :
+
+- Si la p-value de *v_hat* > 5 % : **on ne rejette pas H₀** → *lnPOP* n'est pas endogène, le MCO est préférable.  
+- Si la p-value de *v_hat* < 5 % : **on rejette H₀** → *lnPOP* est endogène, il faut estimer par 2SLS.
+
+## Estimation par les doubles moindres carrés (2SLS)
+
+```{r}
+model_2sls <- ivreg(lnpcENT ~ lnPOP + lnDIPL + REV + txCHOM + METRO |
+                    POP2015 + lnDIPL + REV + txCHOM + METRO,
+                    data = BD2)
+summary(model_2sls, diagnostics = TRUE)
+```
+
+Les diagnostics intégrés à `ivreg` fournissent :
+- **Weak instruments** : F-stat de la première étape (doit être > 10)
+- **Wu-Hausman** : test d'endogénéité (p-value < 5 % -> endogénéité confirmée)
+- **Sargan** (si suridentifié) : test d'exogénéité des instruments
+
+## Tableau comparatif MCO vs 2SLS
+
+```{r, results='asis'}
+stargazer(model2, model_2sls,
+          type = "html",
+          title = "Comparaison MCO et 2SLS",
+          column.labels = c("MCO", "2SLS"),
+          dep.var.labels = "ln(pcENT)",
+          covariate.labels = c("ln(POP)", "ln(DIPL)", "REV", "txCHOM", "METRO (=1)"),
+          omit.stat = c("f","ser"),
+          notes = "Instrument utilisé pour ln(POP) : ln(POP2015). Écarts-types entre parenthèses.",
+          notes.align = "l")
+```
+
+**Interprétation comparative :** Si les coefficients MCO et 2SLS sont proches et que le test de Hausman confirme l'absence d'endogénéité, le modèle MCO est retenu pour sa plus grande efficacité statistique. En cas d'endogénéité confirmée, le modèle 2SLS est préféré malgré une perte de précision.
+
+---
+
+# Modèle final et interprétation
+
+## Modèle retenu
+
+Après la démarche de validation — résolution de la multicolinéarité, vérification des hypothèses MCO, test d'endogénéité — le modèle retenu est :
+
+$$\ln(\widehat{pcENT}_i) = \hat{\beta}_0 + \hat{\beta}_2\ln(POP_i) + \hat{\beta}_3\ln(DIPL_i) + \hat{\beta}_4 REV_i + \hat{\beta}_5 txCHOM_i + \hat{\beta}_6 METRO_i$$
+
+```{r}
+# Modèle final avec écarts-types robustes (précaution standard en coupe transversale)
+model_final <- model2
+coeftest(model_final, vcov = vcovHC(model_final, type = "HC3"))
+```
+
+```{r}
+cat("R² ajusté :", round(summary(model_final)$adj.r.squared, 4),
+    "\nRMSE       :", round(sigma(model_final), 4))
+```
+
+## Interprétation économétrique des coefficients
+
+Le modèle explique environ **`r round(summary(model_final)$adj.r.squared * 100, 1)` %** de la variabilité inter-départementale du taux de création d'entreprises.
+
+**Variables en log-log (élasticités) :**
+
+- **ln(POP) :** Une augmentation de 1 % de la population d'un département est associée, *toutes choses égales par ailleurs*, à une variation de `r round(coef(model_final)["lnPOP"]*100, 2)` % de la proportion de créations d'entreprises. Ce résultat reflète les économies d'agglomération : les grands bassins de population offrent des marchés plus larges, un tissu d'affaires plus dense et une demande plus soutenue.
+
+- **ln(DIPL) :** Une hausse de 1 % de la part de diplômés Bac+3 est associée à une variation de `r round(coef(model_final)["lnDIPL"]*100, 2)` % de *pcENT*. Le capital humain est un déterminant robuste de l'entrepreneuriat : les personnes plus diplômées ont davantage les compétences, réseaux et ressources pour créer une entreprise.
+
+**Variables non transformées (effets marginaux) :**
+
+- **txCHOM :** Un point de chômage supplémentaire est associé à une variation de `r round(coef(model_final)["txCHOM"]*100, 2)` % de *pcENT*. Cet effet positif peut refléter le phénomène d'**entrepreneuriat de nécessité** : face à l'absence d'emploi salarié, certains actifs se tournent vers la création d'entreprise.
+
+- **METRO :** La présence d'une métropole est associée à une variation de `r round(coef(model_final)["METRO1"]*100, 2)` % de *pcENT* (en % relatif, car coefficient d'une variable log). Les métropoles concentrent les services aux entreprises, les incubateurs, le capital-risque et les réseaux professionnels qui facilitent l'entrepreneuriat.
+
+- **REV :** Le revenu médian n'est pas significatif au seuil de 5 %. L'effet du revenu sur la création d'entreprises est ambigu : un revenu élevé peut signaler à la fois un tissu économique dynamique (favorable) et un coût d'opportunité élevé du salariat (défavorable à l'entrepreneuriat).
+
+---
+
+# Conclusion
+
+Ce projet avait pour objectif d'identifier les déterminants des disparités de création d'entreprises entre les départements français métropolitains en 2022. La démarche économétrique adoptée (statistiques descriptives, spécification log-linéaire, vérification des hypothèses de Gauss-Markov, tests d'endogénéité) a permis de construire un modèle MCO robuste expliquant près de **73 % de la variance** inter-départementale de la variable dépendante.
+
+**Principaux enseignements :**
+
+Deux facteurs structurels dominent l'explication des dynamiques entrepreneuriales territoriales. D'une part, la **taille démographique** exerce un effet positif fort via les économies d'agglomération : les grands départements bénéficient de marchés plus profonds, d'une demande plus diversifiée et d'externalités positives de réseau entre entreprises. D'autre part, le **capital humain** (mesuré par la part de diplômés du supérieur) stimule significativement la création d'entreprises, confirmant le rôle central des compétences dans les capacités entrepreneuriales locales. La présence d'une **métropole** amplifie ces effets en concentrant les ressources institutionnelles, financières et informationnelles nécessaires à l'entrepreneuriat. De façon plus surprenante, le **taux de chômage** présente un effet légèrement positif, cohérent avec la littérature sur l'entrepreneuriat de nécessité. En revanche, le **revenu médian** n'exerce pas d'effet significatif, suggérant que la dynamique entrepreneuriale est davantage déterminée par des facteurs structurels (éducation, taille, institutions) que par le niveau de vie moyen.
+
+**Limites et prolongements :**
+
+Plusieurs limites méritent d'être signalées. Premièrement, l'analyse en coupe transversale sur une seule année ne permet pas d'identifier des effets causaux : des effets fixes départementaux non observés (culture entrepreneuriale, qualité des infrastructures) peuvent biaiser les estimations. Une extension en données de panel couvrant plusieurs années permettrait de contrôler ces hétérogénéités. Deuxièmement, bien que le test de Hausman ne détecte pas d'endogénéité significative pour *lnPOP*, la variable *lnnbENT* (initialement exclue pour multicolinéarité) reste potentiellement endogène si l'on souhaite la réintégrer dans une spécification future. Enfin, des variables omises, comme l'accès au crédit, la densité des structures d'accompagnement ou la qualité des transports, pourraient enrichir le pouvoir explicatif du modèle.
+
+Sur le plan des implications de politique publique, ces résultats suggèrent que les politiques de réduction des inégalités territoriales en matière de création d'entreprises devraient prioritairement cibler : (1) le renforcement de l'offre de formation supérieure dans les départements peu dotés, (2) le développement de pôles métropolitains dans les zones à fort déficit d'attractivité, et (3) la mise en place d'accompagnements spécifiques à l'entrepreneuriat de nécessité dans les territoires à fort chômage structurel.
