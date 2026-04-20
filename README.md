@@ -1,0 +1,1 @@
+# Advanced_Econometrics_FR_Departements_Attractivity
