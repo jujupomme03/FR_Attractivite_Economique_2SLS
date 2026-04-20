@@ -1,4 +1,4 @@
-# Attractivité Économique des Départements Français — Économétrie Avancée
+# Attractivité Économique des Départements Français - Économétrie Avancée avec le modèle 2SLS
 
 > Version avancée du projet "FFR_Attractivite_Economique_OLS" - même jeu de données, mais méthodologie approfondie : vérification complète des hypothèses de Gauss-Markov, traitement de la multicolinéarité, autocorrélation, et estimation par doubles moindres carrés (2SLS) pour traiter l'endogénéité.
 
