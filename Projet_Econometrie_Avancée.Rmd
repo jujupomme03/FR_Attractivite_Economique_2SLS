@@ -345,7 +345,7 @@ Les diagnostics intégrés à `ivreg` fournissent :
 
 ```{r, results='asis'}
 stargazer(model2, model_2sls,
-          type = "html",
+          type = "latex",
           title = "Comparaison MCO et 2SLS",
           column.labels = c("MCO", "2SLS"),
           dep.var.labels = "ln(pcENT)",
@@ -402,12 +402,18 @@ Le modèle explique environ **`r round(summary(model_final)$adj.r.squared * 100,
 
 Ce projet avait pour objectif d'identifier les déterminants des disparités de création d'entreprises entre les départements français métropolitains en 2022. La démarche économétrique adoptée (statistiques descriptives, spécification log-linéaire, vérification des hypothèses de Gauss-Markov, tests d'endogénéité) a permis de construire un modèle MCO robuste expliquant près de **73 % de la variance** inter-départementale de la variable dépendante.
 
+\vspace{6pt}
+
 **Principaux enseignements :**
 
-Deux facteurs structurels dominent l'explication des dynamiques entrepreneuriales territoriales. D'une part, la **taille démographique** exerce un effet positif fort via les économies d'agglomération : les grands départements bénéficient de marchés plus profonds, d'une demande plus diversifiée et d'externalités positives de réseau entre entreprises. D'autre part, le **capital humain** (mesuré par la part de diplômés du supérieur) stimule significativement la création d'entreprises, confirmant le rôle central des compétences dans les capacités entrepreneuriales locales. La présence d'une **métropole** amplifie ces effets en concentrant les ressources institutionnelles, financières et informationnelles nécessaires à l'entrepreneuriat. De façon plus surprenante, le **taux de chômage** présente un effet légèrement positif, cohérent avec la littérature sur l'entrepreneuriat de nécessité. En revanche, le **revenu médian** n'exerce pas d'effet significatif, suggérant que la dynamique entrepreneuriale est davantage déterminée par des facteurs structurels (éducation, taille, institutions) que par le niveau de vie moyen.
+Deux facteurs structurels dominent l'explication des dynamiques entrepreneuriales territoriales. D'une part, la **taille démographique** exerce un effet positif fort via les économies d'agglomération : les grands départements bénéficient de marchés plus profonds, d'une demande plus diversifiée et d'externalités positives de réseau entre entreprises. D'autre part, le **capital humain** (mesuré par la part de diplômés du supérieur) stimule significativement la création d'entreprises, confirmant le rôle central des compétences dans les capacités entrepreneuriales locales. 
 
-**Limites et prolongements :**
+La présence d'une **métropole** amplifie ces effets en concentrant les ressources institutionnelles, financières et informationnelles nécessaires à l'entrepreneuriat. De façon plus surprenante, le **taux de chômage** présente un effet légèrement positif, cohérent avec la littérature sur l'entrepreneuriat de nécessité. En revanche, le **revenu médian** n'exerce pas d'effet significatif, suggérant que la dynamique entrepreneuriale est davantage déterminée par des facteurs structurels (éducation, taille, institutions) que par le niveau de vie moyen.
 
-Plusieurs limites méritent d'être signalées. Premièrement, l'analyse en coupe transversale sur une seule année ne permet pas d'identifier des effets causaux : des effets fixes départementaux non observés (culture entrepreneuriale, qualité des infrastructures) peuvent biaiser les estimations. Une extension en données de panel couvrant plusieurs années permettrait de contrôler ces hétérogénéités. Deuxièmement, bien que le test de Hausman ne détecte pas d'endogénéité significative pour *lnPOP*, la variable *lnnbENT* (initialement exclue pour multicolinéarité) reste potentiellement endogène si l'on souhaite la réintégrer dans une spécification future. Enfin, des variables omises, comme l'accès au crédit, la densité des structures d'accompagnement ou la qualité des transports, pourraient enrichir le pouvoir explicatif du modèle.
+\vspace{6pt}
 
-Sur le plan des implications de politique publique, ces résultats suggèrent que les politiques de réduction des inégalités territoriales en matière de création d'entreprises devraient prioritairement cibler : (1) le renforcement de l'offre de formation supérieure dans les départements peu dotés, (2) le développement de pôles métropolitains dans les zones à fort déficit d'attractivité, et (3) la mise en place d'accompagnements spécifiques à l'entrepreneuriat de nécessité dans les territoires à fort chômage structurel.
+**Limites :**
+
+Premièrement, l'analyse sur une seule année ne permet pas d'identifier des effets causaux. Des facteurs propres à chaque département (culture entrepreneuriale, qualité des infrastructures) peuvent influencer les résultats sans être mesurés. Utiliser des données sur plusieurs années permettrait de contrôler ces hétérogénéités et de corriger ce problème.
+
+Deuxièmement, même si les tests statistiques n'ont pas détecté de problème d'endogénéité pour la population (lnPOP), la variable densité d'entreprises (lnnbENT), retirée du modèle car trop liée à la population, pourrait poser ce même problème si on cherchait à la réintégrer. Enfin, certaines variables absentes du modèle, comme la facilité d'accès aux financements, le nombre de structures d'accompagnement à la création d'entreprise, ou encore la qualité des transports, auraient probablement permis d'améliorer la précision des résultats.
